@@ -6,6 +6,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
+console.log("--- SUPABASE DEBUG START ---");
+console.log("VITE_SUPABASE_URL:", import.meta.env.VITE_SUPABASE_URL);
+console.log("VITE SUPABASE ANON_KEY",import.meta.env.VITE_SUPABASE_ANON_KEY )
 
 function Signup({ onSignup, onSwitchToLogin, apiUrl }) {
   const [formData, setFormData] = useState({

@@ -8,6 +8,7 @@ const supabase = createClient(
 );
 
 function Login({ onLogin, onSwitchToSignup, apiUrl }) {
+   console.log("API URL received:", apiUrl);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,7 +29,7 @@ function Login({ onLogin, onSwitchToSignup, apiUrl }) {
 
       const token = data.session.access_token;
 
-      const response = await fetch(`${apiUrl}/profile/me`, {
+      const response = await fetch(`${apiUrl}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 

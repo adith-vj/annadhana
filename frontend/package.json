@@ -3,15 +3,16 @@
   "version": "1.0.0",
   "description": "Annadhana - Smart Food Donation Frontend",
   "dependencies": {
+    "@supabase/supabase-js": "^2.84.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"
   },
   "scripts": {
-  "start": "vite",
-  "build": "vite build",
-  "preview": "vite preview"
-},
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "browserslist": {
     "production": [
       ">0.2%",

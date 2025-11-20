@@ -17,7 +17,7 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
 
   const fetchDonations = async () => {
     try {
-      const response = await fetch(`${apiUrl}/donations/my/donations`, {
+      const response = await fetch(`${apiUrl}/donations/my`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {

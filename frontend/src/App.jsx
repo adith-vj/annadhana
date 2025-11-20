@@ -60,9 +60,9 @@ function App() {
       {view === 'dashboard' && user && (
         <>
           {user.role === 'donor' ? (
-            <DonorDashboard user={user} token={token} onLogout={handleLogout} />
+            <DonorDashboard user={user} token={token} onLogout={handleLogout} apiUrl={API_URL} />
           ) : (
-            <NGODashboard user={user} token={token} onLogout={handleLogout} />
+            <NGODashboard user={user} token={token} onLogout={handleLogout} apiUrl={API_URL} />
           )}
         </>
       )}

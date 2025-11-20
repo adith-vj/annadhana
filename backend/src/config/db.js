@@ -1,27 +1,31 @@
-import { createClient } from '@supabase/supabase-js';
-import 'dotenv/config';
-import { config } from 'dotenv';
-import path from 'path';
+import pg from 'pg';
+import dotenv from 'dotenv';
 
-// Load .env from the backend directory (go up one level from /src)
-config({ path: path.resolve(process.cwd(), '../.env') });
+// Load .env file
+dotenv.config();
 
-console.log('Current directory:', process.cwd());
-console.log('NODE_ENV:', process.env.NODE_ENV);
+const { Pool } = pg;
 
-// Load from environment variables
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+// Create a connection pool using the Connection String from Supabase
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false // Required for Supabase connections
+  }
+});
 
-// Validate environment variables
-if (!supabaseUrl || !supabaseKey) {
-  console.log(supabaseUrl,supabaseKey)
-  throw new Error('❌ Missing Supabase environment variables. Check SUPABASE_URL and SUPABASE_ANON_KEY.');
-}
+// Test the connection
+pool.connect((err, client, release) => {
+  if (err) {
+    return console.error('❌ Error acquiring client', err.stack);
+  }
+  client.query('SELECT NOW()', (err, result) => {
+    release();
+    if (err) {
+      return console.error('❌ Error executing query', err.stack);
+    }
+    console.log('✅ Connected to Supabase (Postgres) successfully');
+  });
+});
 
-// Create Supabase client
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-console.log('✅ Connected to Supabase successfully');
-
-export default supabase;
+export default pool;

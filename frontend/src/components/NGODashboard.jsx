@@ -41,7 +41,7 @@ function NGODashboard({ user, token, apiUrl, onLogout }) {
   };
 
   const fetchMyClaims = async () => {
-    const res = await fetch(`${apiUrl}/donations/my/donations`, {
+    const res = await fetch(`${apiUrl}/donations/my`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();

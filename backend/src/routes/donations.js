@@ -8,17 +8,33 @@ const router = express.Router();
 // 1. CREATE DONATION (Donor Only)
 // Expects: { food_type, quantity, pickup_deadline, latitude, longitude }
 // -----------------------------------------------------
+// routes/donations.js
+
+// ... imports remain the same ...
+
+// -----------------------------------------------------
+// 1. CREATE DONATION (Donor Only)
+// -----------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
   const { food_type, quantity, pickup_deadline, latitude, longitude } = req.body;
-  const donor_id = req.user.id;
-
-  if (req.user.role !== 'donor') {
-    return res.status(403).json({ error: 'Only donors can create donations' });
-  }
+  const user_id = req.user.id; // Get UUID from token
 
   try {
-    // Maps 'food_type' -> 'description' and 'pickup_deadline' -> 'expires_at'
-    // Uses PostGIS ST_MakePoint(long, lat) to create geography
+    // 1. FETCH REAL ROLE FROM DB (Fixes the 'authenticated' issue)
+    const userCheck = await pool.query('SELECT role FROM users WHERE id = $1', [user_id]);
+    
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User profile not found.' });
+    }
+
+    const realRole = userCheck.rows[0].role; // This will be 'donor' or 'ngo'
+
+    // 2. Verify Role (Case Insensitive)
+    if (realRole.toLowerCase() !== 'donor') {
+      return res.status(403).json({ error: `Access denied. Your role is: ${realRole}` });
+    }
+
+    // 3. Insert Donation
     const query = `
       INSERT INTO donations 
       (donor_id, description, quantity, expires_at, location, status) 
@@ -27,7 +43,7 @@ router.post('/', authMiddleware, async (req, res) => {
     `;
 
     const result = await pool.query(query, [
-      donor_id, 
+      user_id, 
       food_type, 
       quantity, 
       pickup_deadline, 
@@ -36,11 +52,14 @@ router.post('/', authMiddleware, async (req, res) => {
     ]);
 
     res.status(201).json(result.rows[0]);
+
   } catch (error) {
     console.error('Create donation error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// ... rest of the file ...
 
 // -----------------------------------------------------
 // 2. GET NEARBY DONATIONS (NGO Feed)
@@ -88,37 +107,49 @@ router.get('/', authMiddleware, async (req, res) => {
 // -----------------------------------------------------
 router.put('/:id/accept', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const ngo_id = req.user.id;
-
-  if (req.user.role !== 'ngo') {
-    return res.status(403).json({ error: 'Only NGOs can accept donations' });
-  }
+  const user_id = req.user.id;
 
   try {
-    // Check if available
+    // 1. FETCH REAL ROLE FROM DB (The Fix)
+    const userCheck = await pool.query('SELECT role FROM users WHERE id = $1', [user_id]);
+    
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const realRole = userCheck.rows[0].role;
+
+    // 2. Verify Role is NGO
+    if (realRole.toLowerCase() !== 'ngo') {
+      return res.status(403).json({ error: 'Only NGOs can accept donations' });
+    }
+
+    // 3. Check if donation exists and is available
     const check = await pool.query('SELECT status FROM donations WHERE id = $1', [id]);
-    if (check.rows.length === 0) return res.status(404).json({ error: 'Donation not found' });
+    if (check.rows.length === 0) {
+        return res.status(404).json({ error: 'Donation not found' });
+    }
     
     if (check.rows[0].status !== 'available') {
       return res.status(400).json({ error: 'Donation is already claimed or collected' });
     }
 
-    // Update to 'claimed' and set 'claimed_by'
+    // 4. Update to 'claimed' and set 'claimed_by'
     const result = await pool.query(
       `UPDATE donations 
        SET status = 'claimed', claimed_by = $1 
        WHERE id = $2 
        RETURNING id, status, claimed_by`,
-      [ngo_id, id]
+      [user_id, id]
     );
 
     res.json(result.rows[0]);
+
   } catch (error) {
     console.error('Accept donation error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
-
 // -----------------------------------------------------
 // 4. UPDATE STATUS (e.g., Mark as Collected)
 // -----------------------------------------------------
@@ -147,14 +178,23 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
 // -----------------------------------------------------
 // 5. GET MY DONATIONS (Donor & NGO History)
 // -----------------------------------------------------
-router.get('/my/donations', authMiddleware, async (req, res) => {
+router.get('/my', authMiddleware, async (req, res) => {
   const user_id = req.user.id;
-  const role = req.user.role;
 
   try {
+    // 1. FETCH REAL ROLE (Fixes the 'authenticated' bug)
+    const userCheck = await pool.query('SELECT role FROM users WHERE id = $1', [user_id]);
+    
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const realRole = userCheck.rows[0].role;
+
     let query;
-    // For Donors: Show items they posted
-    if (role === 'donor') {
+    // 2. DECIDE QUERY BASED ON REAL ROLE
+    if (realRole === 'donor') {
+      // For Donors: Show items they posted
       query = `
         SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, d.status,
                u.full_name as accepted_by_name
@@ -164,8 +204,8 @@ router.get('/my/donations', authMiddleware, async (req, res) => {
         ORDER BY d.created_at DESC
       `;
     } 
-    // For NGOs: Show items they claimed
     else {
+      // For NGOs: Show items they claimed
       query = `
         SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, d.status,
                u.full_name as donor_name
@@ -178,6 +218,7 @@ router.get('/my/donations', authMiddleware, async (req, res) => {
 
     const result = await pool.query(query, [user_id]);
     res.json(result.rows);
+
   } catch (error) {
     console.error('Get my donations error:', error);
     res.status(500).json({ error: 'Server error' });

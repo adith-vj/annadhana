@@ -3,9 +3,13 @@ import pool from '../config/db.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
-// Create donation (Donor only)
+
+// -----------------------------------------------------
+// 1. CREATE DONATION (Donor Only)
+// Expects: { food_type, quantity, pickup_deadline, latitude, longitude }
+// -----------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
-  const { food_type, quantity, pickup_deadline, location } = req.body;
+  const { food_type, quantity, pickup_deadline, latitude, longitude } = req.body;
   const donor_id = req.user.id;
 
   if (req.user.role !== 'donor') {
@@ -13,10 +17,23 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      'INSERT INTO donations (donor_id, food_type, quantity, pickup_deadline, location) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [donor_id, food_type, quantity, pickup_deadline, location]
-    );
+    // Maps 'food_type' -> 'description' and 'pickup_deadline' -> 'expires_at'
+    // Uses PostGIS ST_MakePoint(long, lat) to create geography
+    const query = `
+      INSERT INTO donations 
+      (donor_id, description, quantity, expires_at, location, status) 
+      VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), 'available') 
+      RETURNING id, description as food_type, quantity, expires_at as pickup_deadline, status, created_at
+    `;
+
+    const result = await pool.query(query, [
+      donor_id, 
+      food_type, 
+      quantity, 
+      pickup_deadline, 
+      longitude, 
+      latitude
+    ]);
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -25,35 +42,40 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all donations
+// -----------------------------------------------------
+// 2. GET NEARBY DONATIONS (NGO Feed)
+// Expects Query Params: ?lat=12.9&long=77.5&radius=5000
+// -----------------------------------------------------
 router.get('/', authMiddleware, async (req, res) => {
-  const { status, location } = req.query;
+  const { lat, long, radius = 5000 } = req.query; // Default radius 5km
+
+  // If lat/long missing (first load or error), return empty or all
+  if (!lat || !long) {
+    return res.json([]); 
+  }
 
   try {
-    let query = `
-      SELECT d.*, u.name as donor_name, u.location as donor_location
+    const query = `
+      SELECT 
+        d.id, 
+        d.description as food_type, 
+        d.quantity, 
+        d.expires_at as pickup_deadline, 
+        d.status, 
+        d.created_at,
+        u.full_name as donor_name
       FROM donations d
       JOIN users u ON d.donor_id = u.id
-      WHERE 1=1
+      WHERE d.status = 'available'
+      AND ST_DWithin(
+        d.location,
+        ST_SetSRID(ST_MakePoint($1, $2), 4326),
+        $3
+      )
+      ORDER BY d.created_at DESC
     `;
-    const params = [];
-    let paramIndex = 1;
 
-    if (status) {
-      query += ` AND d.status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
-
-    if (location) {
-      query += ` AND d.location ILIKE $${paramIndex}`;
-      params.push(`%${location}%`);
-      paramIndex++;
-    }
-
-    query += ' ORDER BY d.created_at DESC';
-
-    const result = await pool.query(query, params);
+    const result = await pool.query(query, [parseFloat(long), parseFloat(lat), radius]);
     res.json(result.rows);
   } catch (error) {
     console.error('Get donations error:', error);
@@ -61,31 +83,9 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get donation by ID
-router.get('/:id', authMiddleware, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const result = await pool.query(
-      `SELECT d.*, u.name as donor_name, u.location as donor_location
-       FROM donations d
-       JOIN users u ON d.donor_id = u.id
-       WHERE d.id = $1`,
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Donation not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Get donation error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Accept donation (NGO only)
+// -----------------------------------------------------
+// 3. ACCEPT DONATION (NGO Only)
+// -----------------------------------------------------
 router.put('/:id/accept', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const ngo_id = req.user.id;
@@ -95,24 +95,21 @@ router.put('/:id/accept', authMiddleware, async (req, res) => {
   }
 
   try {
-    // Check if donation exists and is posted
-    const donationCheck = await pool.query(
-      'SELECT * FROM donations WHERE id = $1',
-      [id]
-    );
-
-    if (donationCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Donation not found' });
+    // Check if available
+    const check = await pool.query('SELECT status FROM donations WHERE id = $1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Donation not found' });
+    
+    if (check.rows[0].status !== 'available') {
+      return res.status(400).json({ error: 'Donation is already claimed or collected' });
     }
 
-    if (donationCheck.rows[0].status !== 'posted') {
-      return res.status(400).json({ error: 'Donation is not available' });
-    }
-
-    // Accept donation
+    // Update to 'claimed' and set 'claimed_by'
     const result = await pool.query(
-      'UPDATE donations SET status = $1, accepted_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
-      ['accepted', ngo_id, id]
+      `UPDATE donations 
+       SET status = 'claimed', claimed_by = $1 
+       WHERE id = $2 
+       RETURNING id, status, claimed_by`,
+      [ngo_id, id]
     );
 
     res.json(result.rows[0]);
@@ -122,36 +119,24 @@ router.put('/:id/accept', authMiddleware, async (req, res) => {
   }
 });
 
-// Update donation status (Donor can mark as completed)
+// -----------------------------------------------------
+// 4. UPDATE STATUS (e.g., Mark as Collected)
+// -----------------------------------------------------
 router.put('/:id/status', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status } = req.body; // Expecting 'collected'
   const user_id = req.user.id;
 
   try {
-    // Check if donation exists
-    const donationCheck = await pool.query(
-      'SELECT * FROM donations WHERE id = $1',
-      [id]
-    );
-
-    if (donationCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Donation not found' });
+    // Only allow valid statuses
+    if (!['available', 'claimed', 'collected'].includes(status)) {
+       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const donation = donationCheck.rows[0];
-
-    // Only donor can mark as completed
-    if (status === 'completed' && donation.donor_id !== user_id) {
-      return res.status(403).json({ error: 'Only the donor can mark as completed' });
-    }
-
-    // Update status
     const result = await pool.query(
-      'UPDATE donations SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      `UPDATE donations SET status = $1 WHERE id = $2 RETURNING *`,
       [status, id]
     );
-
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update status error:', error);
@@ -159,27 +144,34 @@ router.put('/:id/status', authMiddleware, async (req, res) => {
   }
 });
 
-// Get donations by current user
+// -----------------------------------------------------
+// 5. GET MY DONATIONS (Donor & NGO History)
+// -----------------------------------------------------
 router.get('/my/donations', authMiddleware, async (req, res) => {
   const user_id = req.user.id;
   const role = req.user.role;
 
   try {
     let query;
+    // For Donors: Show items they posted
     if (role === 'donor') {
       query = `
-        SELECT d.*, u.name as accepted_by_name
+        SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, d.status,
+               u.full_name as accepted_by_name
         FROM donations d
-        LEFT JOIN users u ON d.accepted_by = u.id
+        LEFT JOIN users u ON d.claimed_by = u.id
         WHERE d.donor_id = $1
         ORDER BY d.created_at DESC
       `;
-    } else {
+    } 
+    // For NGOs: Show items they claimed
+    else {
       query = `
-        SELECT d.*, u.name as donor_name, u.location as donor_location
+        SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, d.status,
+               u.full_name as donor_name
         FROM donations d
         JOIN users u ON d.donor_id = u.id
-        WHERE d.accepted_by = $1
+        WHERE d.claimed_by = $1
         ORDER BY d.created_at DESC
       `;
     }

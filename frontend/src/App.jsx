@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import Login from './components/Login.js';
-import Signup from './components/Signup.js';
-import DonorDashboard from './components/DonorDashboard';
-import NGODashboard from './components/NGODashboard';
+import Login from './components/Login.jsx';
+import Signup from './components/Signup.jsx';
+import DonorDashboard from './components/DonorDashboard.jsx';
+import NGODashboard from './components/NGODashboard.jsx';
 
 const API_URL = 'http://localhost:5000/api';
 

@@ -14,7 +14,7 @@ app.use('/api/donations', donationRoutes);
 app.get("/", (req, res) => {
   res.send("🚀 Express backend is running!");
 });
-
+app.use("/api/profile", profileRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

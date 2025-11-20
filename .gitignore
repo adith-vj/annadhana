@@ -1,18 +1,59 @@
-# Node dependencies
+########################################
+# GLOBAL GITIGNORE FOR ANNADHANA PROJECT
+########################################
+
+# Node dependencies (applies to backend & frontend)
 node_modules/
 
-# Environment variables
+# Environment variables (backend & frontend)
 .env
 .env.local
-
-# Next.js build output
-.next/
-out/
+.env.production
+.env.development
 
 # Logs
 logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# MacOS / VSCode
+# Build output (frontend build, backend dist)
+dist/
+build/
+
+# Database files (if any local sqlite or dump)
+*.sql
+*.sqlite
+
+####################
+# FRONTEND SPECIFIC
+####################
+
+# Generated files from React (CRA, Vite, etc.)
+.cache/
+*.cache
+coverage/
+
+####################
+# BACKEND SPECIFIC
+####################
+
+# Temporary files
+.tmp/
+
+####################
+# OS / EDITOR FILES
+####################
+
+# macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+
+# VSCode settings
 .vscode/
+
+# Ignore package-lock if using yarn (optional)
+# package-lock.json

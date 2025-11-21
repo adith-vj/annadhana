@@ -1,4 +1,17 @@
 import React, { useState, useEffect } from "react";
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+
+// --- FIX LEAFLET DEFAULT ICON ISSUE ---
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+let DefaultIcon = L.icon({
+    iconUrl: icon,
+    shadowUrl: iconShadow,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41]
+});
 
 function NGODashboard({ user, token, apiUrl, onLogout }) {
   const [feed, setFeed] = useState([]);
@@ -57,6 +70,29 @@ function NGODashboard({ user, token, apiUrl, onLogout }) {
     if (res.ok) {
       fetchNearbyFeed();
       fetchMyClaims();
+    }
+  };
+  const handleStatusUpdate = async (id, newStatus) => {
+    if (!window.confirm("Confirm you have collected this food?")) return;
+
+    try {
+      const res = await fetch(`${apiUrl}/donations/${id}/status`, {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (res.ok) {
+        fetchMyClaims(); // Refresh the list to show "COLLECTED"
+      } else {
+        const err = await res.json();
+        alert(err.error);
+      }
+    } catch (error) {
+      console.error("Error updating status:", error);
     }
   };
 
@@ -120,6 +156,7 @@ function NGODashboard({ user, token, apiUrl, onLogout }) {
               <th>Food</th>
               <th>Donor</th>
               <th>Status</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -131,6 +168,19 @@ function NGODashboard({ user, token, apiUrl, onLogout }) {
                   <span className={`badge badge-${item.status}`}>
                     {item.status.toUpperCase()}
                   </span>
+                </td>
+                <td>
+                  {/* Only show button if it's just claimed, not yet collected */}
+                  {item.status === 'claimed' && (
+                    <button 
+                      className="secondary" 
+                      style={{ fontSize: '0.8rem', padding: '5px 10px' }}
+                      onClick={() => handleStatusUpdate(item.id, 'collected')}
+                    >
+                      Mark Collected
+                    </button>
+                  )}
+                  {item.status === 'collected' && <span>✅ Done</span>}
                 </td>
               </tr>
             ))}

@@ -76,6 +76,26 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
     );
   };
 
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to remove this item?")) return;
+
+    try {
+      const response = await fetch(`${apiUrl}/donations/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        fetchDonations(); // Refresh list
+      } else {
+        const err = await response.json();
+        alert(err.error);
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    }
+  };
+
   return (
     <div className="container">
       <header className="header">
@@ -139,6 +159,7 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
               <th>Quantity</th>
               <th>Deadline</th>
               <th>Status</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -152,6 +173,22 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
                     {d.status.toUpperCase()}
                   </span>
                 </td>
+                <td>
+                {/* Show Delete button ONLY if Available or Expired */}
+                {(d.status === 'available' || d.status === 'expired') && (
+                  <button 
+                    className="danger-btn" // Add some red styling in CSS if you want
+                    style={{ padding: '5px 10px', backgroundColor: '#ff4d4d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    onClick={() => handleDelete(d.id)}
+                  >
+                    {d.status === 'expired' ? 'Clear' : 'Delete'}
+                  </button>
+                )}
+                {/* Show locked icon for claimed items */}
+                {['claimed', 'collected'].includes(d.status) && (
+                  <span style={{ color: '#888', fontSize: '0.9rem' }}>🔒 Locked</span>
+                )}
+              </td>
               </tr>
             ))}
           </tbody>

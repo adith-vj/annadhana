@@ -379,3 +379,9 @@ tr:hover {
   margin-bottom: 16px;
   opacity: 0.5;
 }
+
+.badge-expired {
+  background-color: #999; /* Grey */
+  color: white;
+  border: 1px solid #777;
+}

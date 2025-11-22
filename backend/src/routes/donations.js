@@ -82,10 +82,16 @@ router.get('/', authMiddleware, async (req, res) => {
         d.expires_at as pickup_deadline, 
         d.status, 
         d.created_at,
+        
+        /* EXTRACT COORDINATES FOR MAP */
+        ST_X(d.location::geometry) as longitude,
+        ST_Y(d.location::geometry) as latitude,
+
         u.full_name as donor_name
       FROM donations d
       JOIN users u ON d.donor_id = u.id
       WHERE d.status = 'available'
+      AND d.expires_at > NOW() 
       AND ST_DWithin(
         d.location,
         ST_SetSRID(ST_MakePoint($1, $2), 4326),
@@ -153,28 +159,41 @@ router.put('/:id/accept', authMiddleware, async (req, res) => {
 // -----------------------------------------------------
 // 4. UPDATE STATUS (e.g., Mark as Collected)
 // -----------------------------------------------------
+// -----------------------------------------------------
+// 4. UPDATE STATUS (Mark as Collected)
+// -----------------------------------------------------
 router.put('/:id/status', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body; // Expecting 'collected'
   const user_id = req.user.id;
 
   try {
-    // Only allow valid statuses
-    if (!['available', 'claimed', 'collected'].includes(status)) {
-       return res.status(400).json({ error: 'Invalid status' });
+    // 1. Validate Input
+    if (status !== 'collected') {
+       return res.status(400).json({ error: 'Invalid status update' });
     }
 
+    // 2. Verify that the logged-in user is the one who claimed it
+    // We add "AND claimed_by = $3" to ensure no one else can close this ticket.
     const result = await pool.query(
-      `UPDATE donations SET status = $1 WHERE id = $2 RETURNING *`,
-      [status, id]
+      `UPDATE donations 
+       SET status = $1 
+       WHERE id = $2 AND claimed_by = $3 
+       RETURNING *`,
+      [status, id, user_id]
     );
+
+    if (result.rows.length === 0) {
+      return res.status(403).json({ error: 'Action failed. You may not be the owner of this claim.' });
+    }
+
     res.json(result.rows[0]);
+
   } catch (error) {
     console.error('Update status error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
-
 // -----------------------------------------------------
 // 5. GET MY DONATIONS (Donor & NGO History)
 // -----------------------------------------------------
@@ -196,8 +215,15 @@ router.get('/my', authMiddleware, async (req, res) => {
     if (realRole === 'donor') {
       // For Donors: Show items they posted
       query = `
-        SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, d.status,
-               u.full_name as accepted_by_name
+        SELECT d.id, d.description as food_type, d.quantity, d.expires_at as pickup_deadline, 
+        
+        /* DYNAMIC STATUS CHECK */
+        CASE 
+            WHEN d.expires_at < NOW() AND d.status = 'available' THEN 'expired'
+            ELSE d.status 
+        END as status,
+
+        u.full_name as accepted_by_name
         FROM donations d
         LEFT JOIN users u ON d.claimed_by = u.id
         WHERE d.donor_id = $1
@@ -221,6 +247,44 @@ router.get('/my', authMiddleware, async (req, res) => {
 
   } catch (error) {
     console.error('Get my donations error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// -----------------------------------------------------
+// 6. DELETE DONATION (Clear Expired/Available)
+// -----------------------------------------------------
+router.delete('/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const user_id = req.user.id;
+
+  try {
+    // 1. Check ownership & status before deleting
+    const checkQuery = 'SELECT donor_id, status FROM donations WHERE id = $1';
+    const check = await pool.query(checkQuery, [id]);
+
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Donation not found' });
+    }
+
+    const donation = check.rows[0];
+
+    // 2. Verify Owner
+    if (donation.donor_id !== user_id) {
+      return res.status(403).json({ error: 'You can only delete your own donations' });
+    }
+
+    // 3. Safety Block: Don't delete if NGO already claimed it
+    if (['claimed', 'collected'].includes(donation.status)) {
+      return res.status(400).json({ error: 'Cannot delete. An NGO has already claimed this!' });
+    }
+
+    // 4. Hard Delete
+    await pool.query('DELETE FROM donations WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Donation removed' });
+
+  } catch (error) {
+    console.error('Delete donation error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

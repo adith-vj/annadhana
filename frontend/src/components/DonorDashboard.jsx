@@ -43,7 +43,7 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
       setLoading(false);
       return;
     }
-
+    
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
@@ -54,7 +54,13 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ ...formData, latitude, longitude }),
+            // We send the date object; JSON.stringify converts this to UTC ISO string automatically
+            body: JSON.stringify({ 
+              ...formData,
+              pickup_deadline: new Date(formData.pickup_deadline),
+              latitude, 
+              longitude 
+            }),
           });
 
           const data = await response.json();
@@ -94,6 +100,24 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
     } catch (err) {
       console.error("Failed to delete:", err);
     }
+  };
+
+  // Helper function to format date to local time clearly
+  const formatDateTime = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    
+    // This checks if the date is valid before trying to format it
+    if (isNaN(date.getTime())) return "Invalid Date";
+
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true, // Ensures AM/PM format
+    });
   };
 
   return (
@@ -167,24 +191,23 @@ function DonorDashboard({ user, token, apiUrl, onLogout }) {
               <tr key={d.id}>
                 <td>{d.food_type}</td>
                 <td>{d.quantity}</td>
-                <td>{new Date(d.pickup_deadline).toLocaleString()}</td>
+                {/* Use the helper function here */}
+                <td>{formatDateTime(d.pickup_deadline)}</td>
                 <td>
                   <span className={`badge badge-${d.status}`}>
                     {d.status.toUpperCase()}
                   </span>
                 </td>
                 <td>
-                {/* Show Delete button ONLY if Available or Expired */}
                 {(d.status === 'available' || d.status === 'expired') && (
                   <button 
-                    className="danger-btn" // Add some red styling in CSS if you want
+                    className="danger-btn" 
                     style={{ padding: '5px 10px', backgroundColor: '#ff4d4d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
                     onClick={() => handleDelete(d.id)}
                   >
                     {d.status === 'expired' ? 'Clear' : 'Delete'}
                   </button>
                 )}
-                {/* Show locked icon for claimed items */}
                 {['claimed', 'collected'].includes(d.status) && (
                   <span style={{ color: '#888', fontSize: '0.9rem' }}>🔒 Locked</span>
                 )}
